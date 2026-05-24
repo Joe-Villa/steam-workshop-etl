@@ -1,0 +1,339 @@
+# Workshop 模组语义地图
+
+给定创意工坊模组的**简略信息**（标题 + 简介等），在二维平面上摆放每一个模组，形成一张可探索的**语义地图**。
+
+数据来源：`input/workshop_map.sqlite`（详情页解析库，含 `map_corpus` 视图）。
+
+## 快速生成语义地图
+
+```bash
+cd workshopmap
+python3 -m venv .venv   # 首次
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python build_semantic_map.py
+# 浏览器打开 out/semantic_map.html
+```
+
+默认读 `input/workshop_map.sqlite` 的 `map_corpus`（`quality_tier=A`、约 9k 条长简介）。
+方法：TF-IDF → SVD → UMAP（无深度学习模型）。
+
+产出：`out/semantic_map.html`、`out/semantic_map.png`、`out/coordinates.jsonl`。
+
+## 从详情页 HTML 建库
+
+```bash
+cd workshopmap
+python3 build_workshop_db.py --mods-dir /path/to/civ6/mods
+# 或设置环境变量 PARADOX_DATA_DIR，默认读 ../external_data/civ6/mods
+```
+
+产出：`out/workshop_map.sqlite`、`out/workshop_map.xlsx`（含 `map_corpus` 等表）。
+
+---
+
+## 地图长什么样（产品愿景）
+
+### 一张图，一个模组一个点
+
+- 平面上**每一个点 = 一个模组**（`mod_id` 唯一，不重复）。
+- 点的 **(x, y)** 来自简介文本的语义向量，再经降维（如 UMAP）得到；**不是**地理地图，也**不是** Steam 浏览列表的翻页顺序。
+- **离得近** ≈ 标题/简介在语义上更像（题材、玩法、时代、国家/转换剧等描述接近）。
+- **离得远** ≈ 描述内容差异大。
+
+可以把它想成：把整页工坊列表按「在讲什么」重新排布，而不是按订阅数一条线排下去。
+
+### 人怎么用
+
+| 能力 | 说明 |
+|------|------|
+| **总览** | 一眼看到工坊里有哪些「话题大陆」：例如架空史、地图、立绘、平衡性 patch 等是否形成团块。 |
+| **悬停 / 点击** | 显示模组名、简介片段、作者、跳转 Steam 详情页链接。 |
+| **找相似** | 选中某模组后，高亮其邻居（可选：列出最近 N 个 mod_id）。 |
+| **筛选 / 上色** | 按 Steam **tag** 着色或过滤；按 **tag 内排名**（`rank_in_tag`，列表按订阅排序下的名次）调节点大小或透明度，突出「在该分类里很靠前」的模组。 |
+| **搜索** | 按标题关键词定位点，或（后续）用文本查询找语义最近的一批模组。 |
+
+第一版可以是**静态 HTML / PNG**（能缩放、能悬停即可）；交互增强（WebGL、力导向动画）放在后面。
+
+### 和 Steam 官方 tag 的关系
+
+- **语义坐标**：只由 `title + description`（等文本）决定，**不把 tag 写进 embedding**，避免「分类标签」绑架「内容相似」。
+- **tag / 各 tag 内排名**：作为**元数据**叠在点上——用来上色、筛选、对照「Steam 认为它属于哪类」和「语义上它挨着谁」。
+- 有价值的现象举例：两个模组语义上挨在一起，但 tag 完全不同；或同一 tag 在图上裂成好几块（说明该 tag 内容很杂）。
+
+### 明确「不是什么」
+
+- **不是**按订阅量排序的条形榜；热度只通过点大小/颜色等**视觉通道**表达，不改变语义上的相对位置。
+- **不是**每个 tag 一张独立地图（除非 deliberately 做对比视图）；默认是**全工坊一张图、一 mod 一点**。
+- **不是**模组文件内容（脚本/事件）的相似度；现阶段只有 browse **简略页**，没有详情页全文。
+
+### 视觉草图（逻辑）
+
+```
+                    [ 架空 / 奇幻 Total Conversion 团块 ]
+                           ·  ·  ·
+                        ·     ★ Anbennar
+                      ·   ·
+
+    [ 地图 / 省份 ]              [ 立绘 / UI ]
+        · · ·                          ·  ·
+       ·   ·                          · ·
+
+              [ 小型 QOL / Fixes 散点 ]
+                    ·  ·    ·
+```
+
+- 团块 = 语义聚类（算法或肉眼均可）。
+- 散点 = 描述短、题材杂、或与其他模组重叠度低的内容。
+
+---
+
+## 数据与管线（概要）
+
+```
+moddescription (SQLite, 按 tag 表存 description)
+        ↓  export corpus + mod_tags 元数据
+workshopmap/data/
+        ↓  embedding → UMAP (x, y)
+workshopmap/out/   坐标 + 合并元数据
+        ↓
+静态地图 / 简单 Web 页面
+```
+
+**语料**：每个 `mod_id` 一行，`text_for_embedding = title + description`（简介从各 tag 表合并，取 `rank_in_tag` 最优的一条）。
+
+**元数据（与坐标并列保存，不参与降维）**：
+
+- `tags[]`：该 mod 出现在哪些 Steam tag 表；
+- 可选 `mod_tags` 明细：`tag, rank_in_tag`（tag 内列表名次，**不是**精确订阅数）。
+
+---
+
+## 分阶段交付
+
+| 阶段 | 产出 | 完成标准 |
+|------|------|----------|
+| **0** | 本文档 + `corpus` / 元数据导出 | 行数与 `mods_all` 一致，抽检简介正确 |
+| **1** | 子集（约 500～1000 mod）静态散点图 | 肉眼可见合理团块，邻居标题可读 |
+| **2** | 全量单游戏（如 EU4 ~1.4 万点） | 可交互悬停、链到 Steam |
+| **3** | 多游戏 / 搜索 / 与 tag 对照报告 | 按需扩展 |
+
+---
+
+## 成功时看起来像什么
+
+打开地图后，应能回答这类问题（而不必逐个翻工坊页）：
+
+1. 这类游戏工坊里，**主要有哪些内容方向**？各占多大一块？
+2. **和某模组类似**的还有谁？（语义邻居）
+3. 某个 Steam **tag** 下的模组，在语义上是**一整块**还是**好几块**？
+4. 高排名（`rank_in_tag` 靠前）的模组，在图上是否集中在某些区域？
+
+若以上问题大多能靠「看图 + 点选」回答，语义地图就达到预期形态。
+
+---
+
+## 高质量输入：建议的表结构
+
+面向「尽可能好的语义地图」，数据源应优先用**详情页 HTML**（如 `…/爬取的数据/civ6/mods/**/mod_*.html`：含完整 `workshopItemDescription`、多组 tag、订阅数、依赖关系），browse 简略库（`moddescription`）作补全与排名补充。
+
+建议落盘为单个 SQLite（例：`input/workshop_map.sqlite`），表如下。**一张图仍对应 `mods.mod_id` 一行**；embedding 只读文本相关列，热度与 tag 仅作元数据。
+
+### 设计原则（与建表的关系）
+
+| 用途 | 放哪张表 | 是否进入 `text_for_embedding` |
+|------|----------|--------------------------------|
+| 决定语义坐标 | `mod_descriptions.description_plain` + `mods.title` | 是 |
+| 补丁/子模组语境 | `mod_relations` → 可拼接父模组标题 | 可选，短句追加 |
+| Steam 官方 tag | `mod_tags` | 否（仅上色、筛选） |
+| 订阅数、曝光 | `mods.subscribers` 等 | 否（仅点大小/透明度） |
+| browse 列表名次 | `mod_browse_placement.rank_in_tag` | 否 |
+| 评论区、外链域名 | 不建表或 `embed_excluded=1` | 否 |
+
+---
+
+### 表 1：`games`（维度，可选）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `app_id` | INTEGER PK | 如 CIV6 = 289070 |
+| `game_name` | TEXT | 显示用 |
+| `workshop_url` | TEXT | 工坊首页 |
+
+---
+
+### 表 2：`mods`（核心，一 mod 一行）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT PK | Steam publishedfileid |
+| `app_id` | INTEGER FK → `games` | 所属游戏 |
+| `title` | TEXT NOT NULL | `workshopItemTitle` |
+| `detail_url` | TEXT NOT NULL | 详情页 URL |
+| `author_name` | TEXT | 作者显示名 |
+| `author_steam_id` | TEXT | 可空 |
+| `subscribers` | INTEGER | Current Subscribers |
+| `favorites` | INTEGER | Current Favorites |
+| `unique_visitors` | INTEGER | Unique Visitors |
+| `file_size_bytes` | INTEGER | 可空 |
+| `posted_at` | TEXT / ISO8601 | Posted |
+| `updated_at` | TEXT | Updated |
+| `change_notes_count` | INTEGER | 变更说明条数，可空 |
+| `has_detail_html` | INTEGER 0/1 | 是否已抓到详情页 |
+| `source_html_path` | TEXT | 原始 HTML 路径，便于重跑解析 |
+| `parsed_at` | TEXT | 解析时间 |
+| `parse_version` | TEXT | 解析器版本号 |
+
+说明：热度字段**不参与** UMAP，只供可视化与过滤（如「只显示 subscribers &gt; 1000」）。
+
+---
+
+### 表 3：`mod_descriptions`（语义主粮，一 mod 一行）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT PK FK → `mods` | |
+| `description_html` | TEXT | `#highlightContent` 原始 HTML |
+| `description_plain` | TEXT NOT NULL | BBCode/HTML 清洗后的正文（embedding 主输入） |
+| `description_short` | TEXT | browse 悬停简介，详情缺失时作 fallback |
+| `char_count` | INTEGER | 正文字符数 |
+| `lang` | TEXT | 检测语言：`en` / `zh` / `mixed` / `unknown` |
+| `content_hash` | TEXT | `description_plain` 哈希，用于近重复去重 |
+| `embed_excluded` | INTEGER 0/1 | 1 = 过短/纯模板/近重复，不参与建图 |
+| `embed_excluded_reason` | TEXT | 如 `too_short` / `duplicate` / `boilerplate_only` |
+
+**`text_for_embedding` 推荐配方（写入视图或导出脚本，不必落表）：**
+
+```text
+{title}
+
+{description_plain}
+```
+
+可选追加（同一 mod 多行关系聚合后）：
+
+```text
+Requires: {parent_title_1}; {parent_title_2}
+```
+
+**不要**把 tag 名、订阅数、URL 列表拼进正文（会加剧中心挤团）。
+
+---
+
+### 表 4：`mod_tags`（多对多，Steam 详情页标签）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT FK | |
+| `tag_group` | TEXT NOT NULL | 对应 `workshopTagsTitle`：`Type` / `Mod` / …（CIV6 常见分组） |
+| `tag_name` | TEXT NOT NULL | 如 `Gameplay`、`Civilizations` |
+| PK | | (`mod_id`, `tag_group`, `tag_name`) |
+
+说明：CIV6 等同页多组 tag，**必须带 `tag_group`**，避免不同维度标签同名冲突。
+
+---
+
+### 表 5：`mod_browse_placement`（可选，来自 browse 爬取）
+
+与 `moddescription` 各 tag 表等价，用于**列表名次**，与详情页 tag 可不一致（以详情为准做分类，以 browse 为准做「在该类订阅排序下的名次」）。
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT FK | |
+| `browse_tag` | TEXT | 如 `Alternative_History` |
+| `rank_in_tag` | INTEGER | 该 tag 下列表名次（按订阅排序爬取） |
+| `star_rating` | TEXT | 可空 |
+| PK | | (`mod_id`, `browse_tag`) |
+
+---
+
+### 表 6：`mod_relations`（可选，依赖 / 合集）
+
+从详情页 `extended_data.sharedfile.m_parentsDetails` 等解析。
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT FK | 子模组或当前页 |
+| `related_mod_id` | TEXT | 父模组 / 依赖目标 |
+| `relation_type` | TEXT | `requires` / `child_of` / `collection_item` |
+| PK | | (`mod_id`, `related_mod_id`, `relation_type`) |
+
+用于：patch 类模组在语义上靠近本体；建 corpus 时可把父模组 `title` 短句拼入。
+
+---
+
+### 表 7：`mod_changelog`（可选，进阶）
+
+若解析 Change Notes 页或详情内摘要：
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT FK | |
+| `seq` | INTEGER | 序号 |
+| `changed_at` | TEXT | |
+| `note_plain` | TEXT | 清洗后文本 |
+
+仅当需要「按更新主题」细分时使用；**第一版地图可不做**，避免噪声。
+
+---
+
+### 表 8：`authors`（可选）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `author_name` | TEXT PK | 与 `mods.author_name` 对齐 |
+| `is_chinese` | INTEGER 0/1 | 与 vic3analysis 作者标注一致时可接入 |
+
+不参与 embedding；用于国别/作者维度的**后验分析**，不是语义坐标。
+
+---
+
+### 视图或导出表：`map_corpus`（给 `build_semantic_map.py` 读）
+
+可由 SQL 视图实现，字段尽量少：
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `mod_id` | TEXT PK | |
+| `title` | TEXT | |
+| `text_for_embedding` | TEXT | 按上文配方生成 |
+| `detail_url` | TEXT | |
+| `subscribers` | INTEGER | 可视化用 |
+| `primary_tag` | TEXT | 如 `mod_tags` 中第一个 Mod 组标签，或 `best browse_tag` |
+| `tag_list` | TEXT | JSON 数组或逗号分隔，悬停用 |
+| `lang` | TEXT | |
+| `quality_tier` | TEXT | `A` 有详情正文 / `B` 仅 short / `C` excluded |
+
+**纳入建图条件：** `embed_excluded = 0` 且 `char_count` ≥ 阈值（建议 80～120，按游戏调参）。
+
+---
+
+### 下游产物表（输出，非输入，但可同库）
+
+| 表 | 用途 |
+|----|------|
+| `map_embeddings` | `mod_id`, `model_name`, `dim`, `vector` BLOB 或外置 `.npy` 索引 |
+| `map_layout` | `mod_id`, `layout_name`, `x`, `y`, `created_at`（同一 mod 可存多套 UMAP 参数） |
+
+---
+
+### 与现有数据的路径对应
+
+| 来源 | 填入哪些表 |
+|------|------------|
+| `civ6/mods/**/mod_*.html`（约 1.2 万详情页） | `mods`, `mod_descriptions`, `mod_tags`, `mod_relations` |
+| `moddescription/…/workshop_mods.sqlite`（browse） | `mod_browse_placement`；`description_short`；补全「无详情页」的 mod |
+| 并集 | `mods` 以 `mod_id` 去重；有详情优先用 `description_plain`，无详情降级 `description_short` |
+
+**覆盖率：** 仅详情库时，工坊全量 mod 可能多于已爬详情；务必保留 `has_detail_html` 与 browse 并集，避免地图只代表「已爬子集」却误以为全工坊。
+
+---
+
+### 最小可行 vs 完整版
+
+| 档位 | 必需表 | 预期效果 |
+|------|--------|----------|
+| **MVP** | `mods` + `mod_descriptions` + `mod_tags` | 明显优于仅 browse 悬停简介；中心挤团减轻 |
+| **推荐** | 上表 + `mod_browse_placement` + `mod_relations` | 可上色、可按热度筛、patch 更准 |
+| **完整** | 再加 `mod_changelog`、`authors`、`map_embeddings` / `map_layout` | 可复现、可 A/B 多套布局 |
+
+建表顺序建议：先解析详情 HTML 填满 `mods` / `mod_descriptions` / `mod_tags`，再 LEFT JOIN browse 补 `mod_browse_placement` 与 `description_short`，最后导出 `map_corpus` 供地图脚本消费。

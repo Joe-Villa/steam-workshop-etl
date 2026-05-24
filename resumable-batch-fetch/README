@@ -1,0 +1,60 @@
+这是什么？
+
+这是一个开箱即用的网络爬虫。
+
+您只需要给定需要的URL、改几个配置、做几个测试、初始化爬取状态、然后启动爬虫。
+
+爬虫便会自动以尽可能快的速度，将所有URL对应的HTML页面爬取下来。
+
+我们已经处理了各种复杂的情况。是工业可用的？（不确定。要确认一下）
+
+
+
+
+爬虫使用方式：
+
+**依赖（异步爬虫）**：需要 `aiohttp`、`requests`。推荐在本子目录建虚拟环境：
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+从仓库根目录 `python main.py` 跑流水线时，总控会自动使用上述 `.venv/bin/python3`（若已安装依赖）。
+
+关于config配置文件：
+这个你应该能看懂每个内容是什么。我不说了。
+
+
+
+对于源代码：
+
+1.编写cfg/config.json的配置文件。这个路径和文件名是固定的。
+2. （建议）运行test/checkport.py，测试端口连通性
+3. 二选一：将 JSON 形式的 URL 列表放在 input 路径下、然后运行 `src/init_mod_fetch_sqlite.py` 生成 sqlite 状态文件，或者直接使用已有的 sqlite 状态文件。若已存在则会拒绝覆盖。
+4.运行 `src/fetch_via_id.py` 开始爬取。崩溃后重启即可续跑。
+
+或一步完成 3+4：运行 `python src/main.py`（无 sqlite 则先初始化再爬取；已有则续跑）。
+
+
+
+
+
+对于gui：
+1. 编写或导入 cfg/config.json（「配置」页）
+2. （建议）「工具」页测试端口连通性
+3. 「初始化」页：从 URL 列表 JSON 生成 SQLite 状态，或自备已有 SQLite
+4. 「爬取」页：开始/停止 fetch_via_id；崩溃后再次启动可续跑
+
+
+
+补充：
+1. 随时运行 `test/stat_mod_fetch.py` 查看进度。
+2. `input/` 放 URL 列表与 SQLite 爬取状态（`io.status_info`，默认 `mod_fetch.sqlite`）；`output/` 放 HTML、日志等运行产物。
+
+
+
+我们的项目的亮点：
+
+1. 开箱即用、使用起来非常简单。
+2. 将配置与运行数据分离（cfg / input / output）。

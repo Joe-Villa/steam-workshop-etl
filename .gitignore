@@ -1,0 +1,48 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# IDE / 本地工具
+.cursor/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# 密钥与本地环境
+.env
+.env.*
+*.pem
+*credentials*
+
+# 爬取数据（GB 级，勿上传 GitHub）
+data/*
+!data/APPID/
+!data/APPID/**
+
+# 子包运行产物
+**/output/
+**/status/
+**/step/
+**/*.html.tmp
+*.pid
+
+# 旧版爬虫 / 实验子项目的数据
+SteamWorkshopCrawler/data/
+SteamWorkshopCrawler/status/
+workshopmap/input/
+
+# 个人资料（含手机号、邮箱，勿公开）
+zzz简历复制/
+
+# Agent 会话记忆（与项目代码无关）
+memory/

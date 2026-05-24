@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+
+# 本地配置（APPID 由 main.py 写入，因人而异）
+cfg/base.json
+
+# 流水线运行产物（可完全用 main.py 重新生成）
+output/
+
+# 中间态（URL 列表、缺口报告等；体积大或随游戏而变）
+status/
+
+# 爬虫写入时的临时文件
+**/*.html.tmp
+
+# 编辑器 / 系统
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/

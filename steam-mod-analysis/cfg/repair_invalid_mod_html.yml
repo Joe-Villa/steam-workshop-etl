@@ -1,0 +1,10 @@
+paths:
+  mods_root: data/html
+
+timing:
+  html_sleep_min_seconds: 6.0
+  html_sleep_max_seconds: 10.0
+  request_timeout_seconds: 25
+
+retry:
+  max_html_retries: 3

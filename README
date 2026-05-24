@@ -1,0 +1,215 @@
+这是什么？
+这是一整个项目，从零开始做收集数据、清洗数据、分析数据等事情。
+目前已经实现了单个游戏，从零开始的爬取数据与基本分析。
+
+## 配置与数据目录
+
+配置只维护仓库根目录 `cfg/`（见 `cfg/README.md`），子包内勿再放重复的 `base.json`。
+
+在 `cfg/base.json` 中设置当前游戏与网络：
+
+```json
+{
+    "target-game-id": 281990,
+    "data-folder": "data/281990",
+    "PORT": 26561,
+    "no_tls_verify": true
+}
+```
+
+详情爬虫端口池在 `cfg/crawler.json`。
+
+各子包读写路径均相对 `data-folder`（结构见 `data/APPID/` 模板）：
+
+| 阶段 | 包 | 主要路径 |
+|------|-----|----------|
+| 简略信息表 | `appid-steamworkshop-table` | `simple_info/`（`current_situation.json`、`browse_urls.json`、`html/`、`name.sqlite`、`urls.json`） |
+| 详情页爬取 | `resumable-batch-fetch` | 输入 `simple_info/urls.json`；输出 `concrete_html/html/`、`concrete_html/mod_fetch.sqlite` |
+| 建库与分析 | `steam-mod-analysis` | `concrete_html/html/` → `concrete_info/name.sqlite`；报告在 `concrete_info/report/` |
+
+路径解析实现：`lib/paradox_paths.py`。
+
+## 总控入口 `main.py`
+
+阶段 2（`resumable-batch-fetch`）需要 **aiohttp**。总控会优先用子目录里的 `.venv`；若未创建：
+
+```bash
+python3 -m venv resumable-batch-fetch/.venv
+resumable-batch-fetch/.venv/bin/pip install -r resumable-batch-fetch/requirements.txt
+```
+
+```bash
+python test/smoke.py                     # 冒烟：代理、APPID、工坊、aiohttp 等（建议先跑）
+python main.py --status                    # 查看断点与产物是否齐全
+python main.py                           # 从推断阶段断点续跑
+python main.py 529340                    # 切换游戏并跑流水线
+python main.py --data-folder /绝对路径/529340   # 数据存到仓库外（写入 cfg/base.json）
+python main.py --fresh                   # 仅当数据目录为空时从头开始
+python main.py --fresh --force-fresh     # 非空目录也重跑（不删 HTML，只清状态文件）
+python main.py --only detail_fetch       # 只跑某一阶段
+python main.py --no-tls-verify           # 阶段 1 走代理时跳过 TLS 校验
+```
+
+- 断点：`data/<APPID>/pipeline_state.json` 记录当前阶段；子包内另有 `mod_fetch.sqlite`、HTML 等细粒度续爬。
+- 数据保护：无状态文件且目录里已有爬取产物时，默认拒绝启动，避免误覆盖；续跑直接 `python main.py`。
+- 失败时打印错误码、原因与处理建议（见 `lib/pipeline.py`）。
+
+
+
+
+
+
+对于每一个游戏的数据爬取方法：
+
+我们只需要输入一件事情：我们关注的游戏的APPID是什么？只要知道这一点，那么接下来就能获取各种数据了！
+
+一、获取模组简略信息
+    我们首先访问`https://steamcommunity.com/app/{APPID}/workshop`，看创意工坊的总体情况。
+    然后根据总体情况，收集模组简略数据的页面。这个速度会非常快，因为创意工坊简略页没有限流。
+    最后我们将收集到的页面进行整理，整理成为一个表。
+    项目：`appid-steamworkshop-table`
+    交付成果：
+    1.爬取到的html页面
+    2.一个sqlite表以及对应的excel
+    3.所有模组的url对应的数组，供给下一个步骤
+    4.当前的现状。也即appid-steamworkshop-table/output/workshop_main.json
+
+二、爬取模组详细信息页面
+    将模组简略信息当中，每个模组的详细页面url提取出来。这些是我们需要爬取的页面。
+    用我们的高效爬虫，将所有页面爬下来。
+    项目：`resumable-batch-fetch`
+    交付成果：
+    1.爬取到的html页面
+
+
+
+三、进行初步的数据整理与分析
+    首先，我们将模组详细页面的爬虫，整理为若干个sqlite表
+    然后我们根据详细表，整理出各种模组统计信息
+    项目：`steam-mod-analysis`
+    交付成果：
+    1.一个sqlite数据库以及一张总的表
+    2.若干个分析报告
+
+
+四、做其他各种复杂的数据分析
+    例如语义地图、简介长度分析、模组大小分析等。
+    这些目前还没有实现。
+
+五、做交叉对比分析
+    例如分析不同游戏之间的订阅量汇率、订阅量与曝光量比例等。
+    这些目前还没有实现。
+
+
+
+
+
+
+未来改进方向（重要）：
+    1.将这个总体的流水线给打通，对于单个模组只需要给定一个url就能爬取所有详细页面。
+    2.对于总体的流水线，记录全局的运行状态。同时加一些保护，防止一不小心把爬取的几个G的数据给搞没有了。
+    3.允许做总体循环，爬取完一个游戏后就爬取下一个游戏。能真正当上甩手掌柜
+    4.将resumable-batch-fetch独立发布到github。这是一个内容无关的爬虫，只要设计的够好，肯定会有人需要的。
+
+
+
+我们对于第三步生成的总统计表，要做如下改变。只改变生成表的代码即可，不需要改变已有的表：
+1.将browse当中的所有表加入进去。
+2.删除掉mod_tag_flags表
+3.删除掉authors表，但是代码中保留作者甄别的方式，只不过暂时不启用。
+4.删除掉mods表当中的author_username列
+5.添加一个元数据表。表的结构如下：
+
+
+数据说明 |关于mod_tag_ranks，我们做的是它在steam创意浏览页上的先后排名，而不是subscribers的先后排名。| 对于模组作者，我们用的是其在创意工坊浏览页的那一个用户名，也就是忽略了其他贡献者。|关于mod_browse_info，其description是浏览页面的简介，有截断。
+创建时间|{生成表格时的时间}
+模组总数量|{当前模组的数量}
+
+
+
+
+技术细节：
+    获取模组简略信息的方法：
+        我们在收集模组id的时候，遇到了重大问题：
+        我们在任意一个排序页面向下滚动，都最多只能滚动到1667页，拿到大约五万个模组。（在GUI是最多一千页，但是用URL可以获取更多；不过上限也就是五万个模组了）
+        我们使用了交叉比对方式，尽可能拿到详细的模组页面表：
+        对于所有tag的前五万名，以及没有任何tag的前五万名。如果模组数量少于五万个，一定不会漏模组；如果多于五万个，但任意标签少于五万个，那么没有tag且五万名之后的不会被记录；如果有tag多于五万个，那么只有这些热门tag的模组不会被记录
+
+
+    关于详细页面的爬虫：
+        爬虫本身是内容无关的。它不仅仅可以用于爬取模组详细页面，还能爬取任意的url簇。
+        我们根据steam创意工坊的特性（单IP有访问速率限制，但没有验证码等复杂情况）做了针对性设计。使用异步+多端口的方式实现。
+
+
+
+未来改进方向（画饼）：
+1.进行更多的交叉比对，尽可能抓取完成所有模组。因为抓取模组简略页没有什么限速，成本很低，这是可以改进的。
+2.做单个游戏模组的各种详细分析。
+3.做各种游戏之间的的交叉对比分析。
+
+
+
+
+
+
+
+当前业务需求：
+    目标游戏选择原因：
+        P社五萌很明显是必选的。
+        EU5虽然比较新，但是也有2000个模组了，值得统计
+        文明6、骑砍2、环世界都是和P社五萌很相似的，也加上。
+        文明7的模组太少了，我们暂时不考虑。
+        城市天际线的模组虽然特别多，但是很适合我们做大规模的分析。也加上。
+        总共有10个游戏。
+
+    目标游戏：
+
+        十字军之王3
+        欧陆风云4
+        维多利亚3
+        钢铁雄心4
+        群星
+
+        EU5
+        文明6
+        骑马与砍杀2
+        环世界
+        城市天际线
+
+
+    其中的模组个数：
+
+        十字军：1.4万
+        EU：1.6万
+        维多利亚：1.0万
+        钢丝：6.3万
+        群星：3.6万
+
+
+        EU5：0.2万
+        文明6：1.2万
+        骑马与砍杀2：0.1万
+        环世界：5.5万
+        城市天际线：36.9万
+
+        合计：
+        14万（P社五萌）
+        21万（不算城市天际线）
+        58万（如果含城市天际线）
+
+    各个游戏的APPID：
+
+        CK3：1158310
+        EU4：236850
+        VIC3：529340
+        HOI4：394360
+        Stellaris：281990
+
+        EU5：3450310
+        CIV6：289070
+        MountBlade：261550
+        RimWorld：294100
+        Skylines：255710
+
+
+我们等到500开始记录时间，到1500

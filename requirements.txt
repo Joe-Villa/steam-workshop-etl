@@ -1,0 +1,11 @@
+# 仓库根：汇总各子包依赖。详情爬虫建议单独 venv：
+#   python3 -m venv resumable-batch-fetch/.venv
+#   resumable-batch-fetch/.venv/bin/pip install -r resumable-batch-fetch/requirements.txt
+
+-r appid-steamworkshop-table/requirements.txt
+-r resumable-batch-fetch/requirements.txt
+
+# steam-mod-analysis（建库、统计、可视化）
+matplotlib>=3.7
+numpy>=1.24
+openpyxl>=3.1.0
