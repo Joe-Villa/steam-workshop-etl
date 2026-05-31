@@ -25,11 +25,13 @@ CONCRETE_HTML_DIR = "html"
 CONCRETE_FETCH_SQLITE = "mod_fetch.sqlite"
 CONCRETE_FETCH_LOG = "output.log"
 
-# concrete_info (steam-mod-analysis)
+# concrete_info (steam-grant-table 建库产物)
 CONCRETE_INFO_SQLITE = "name.sqlite"
 CONCRETE_INFO_XLSX = "name.xlsx"
-CONCRETE_INFO_REPORT = "report"
 CONCRETE_INFO_META = "info"
+
+# report（steam-mod-analysis 分析报告，与 simple_info 等平级）
+DATA_REPORT_DIR = "report"
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -86,14 +88,9 @@ def parse_appid(cfg: dict) -> int:
 
 
 def resolve_data_root(repo_root: Path, cfg: dict) -> Path:
+    """Default game data root: ``{repo}/data/{target-game-id}/``."""
     appid = parse_appid(cfg)
-    folder = cfg.get("data-folder")
-    if folder is None or (isinstance(folder, str) and not folder.strip()):
-        return (repo_root / "data" / str(appid)).resolve()
-    p = Path(str(folder).strip())
-    if not p.is_absolute():
-        p = repo_root / p
-    return p.resolve()
+    return (repo_root / "data" / str(appid)).resolve()
 
 
 @dataclass(frozen=True)
@@ -165,20 +162,30 @@ class ParadoxDataLayout:
         return self.concrete_info / CONCRETE_INFO_XLSX
 
     @property
+    def report_dir(self) -> Path:
+        return self.root / DATA_REPORT_DIR
+
+    @property
     def analysis_report_dir(self) -> Path:
-        return self.concrete_info / CONCRETE_INFO_REPORT
+        """Alias for :attr:`report_dir` (legacy name)."""
+        return self.report_dir
 
     @property
     def analysis_info_dir(self) -> Path:
         return self.concrete_info / CONCRETE_INFO_META
 
 
-def load_layout(repo_root: Path | None = None, *, cfg: dict | None = None) -> ParadoxDataLayout:
+def load_layout(
+    repo_root: Path | None = None,
+    *,
+    cfg: dict | None = None,
+    data_root: Path | None = None,
+) -> ParadoxDataLayout:
     root = repo_root or find_repo_root()
     data = cfg if cfg is not None else load_base_json(root)
     appid = parse_appid(data)
-    data_root = resolve_data_root(root, data)
-    return ParadoxDataLayout(repo_root=root, appid=appid, root=data_root)
+    resolved = data_root.resolve() if data_root is not None else resolve_data_root(root, data)
+    return ParadoxDataLayout(repo_root=root, appid=appid, root=resolved)
 
 
 def ensure_layout_dirs(layout: ParadoxDataLayout) -> None:
@@ -188,7 +195,7 @@ def ensure_layout_dirs(layout: ParadoxDataLayout) -> None:
         layout.concrete_html,
         layout.concrete_html_root,
         layout.concrete_info,
-        layout.analysis_report_dir,
+        layout.report_dir,
         layout.analysis_info_dir,
     ):
         d.mkdir(parents=True, exist_ok=True)
@@ -197,25 +204,17 @@ def ensure_layout_dirs(layout: ParadoxDataLayout) -> None:
 def merge_write_base_config(
     appid: int,
     *,
-    data_folder: str | Path | None = None,
     repo_root: Path | None = None,
 ) -> Path:
-    """Update ``target-game-id`` and ``data-folder`` in repo ``cfg/base.json``."""
+    """Update ``target-game-id`` in repo ``cfg/base.json`` (no ``data-folder``)."""
     root = repo_root or find_repo_root()
     path = base_json_path(root)
     cfg: dict = {}
     if path.is_file():
         cfg = load_base_json(root)
     cfg["target-game-id"] = appid
-    if data_folder is not None:
-        folder = Path(data_folder)
-        if folder.is_absolute():
-            cfg["data-folder"] = folder.as_posix()
-        else:
-            cfg["data-folder"] = str(folder).strip()
-    elif "data-folder" not in cfg:
-        cfg["data-folder"] = f"data/{appid}"
     cfg.pop("APPID", None)
+    cfg.pop("data-folder", None)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cfg, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
     return path.resolve()

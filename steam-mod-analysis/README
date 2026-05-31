@@ -1,50 +1,25 @@
-说明：
-我们对于模组是否为国模，有两个选项：
-1.直接通过作者名称判断
-2.综合进行分析，使用 tool/classify_author_nationality.py
+# steam-mod-analysis
 
+从 `concrete_info/name.sqlite` 读取建库结果，生成统计报告与图表。
 
-# 长选项（与旧名 --mods-dir 等价）
-python3 build_sqlite/build_all_tables.py --html-dir /home/liulingda/桌面/vic3modder/analysis_paradox/resumable-batch-fetch/output/html
-# 不指定则仍用 data/html
-python build_sqlite/build_all_tables.py
+输出目录：`data/<APPID>/report/`（与 `simple_info/`、`concrete_html/`、`concrete_info/` 平级）。
 
+## 用法
 
+```bash
+python3 main.py pipeline/run_analysis.json
+python3 main.py pipeline/run_analysis.json --game vic3
+```
 
-这是一个面向 **Steam 创意工坊**（多游戏通用）的数据分析项目，包括采集、建库与统计分析。`data/result` 默认输出不带具体游戏前缀；若需区分游戏可加 `--game civ6` 等。
+## 目录
 
-## 数据目录（`data/<APPID>/`，由仓库根 `cfg/base.json` 的 `data-folder` 决定）
-
-| 目录 | 内容 |
+| 路径 | 说明 |
 |------|------|
-| `simple_info/` | 步骤一：简略页 HTML、`current_situation.json`、`name.sqlite`、`urls.json`（详情 URL 列表） |
-| `concrete_html/html/` | 步骤二：模组详情页 HTML；`concrete_html/mod_fetch.sqlite` 为爬取状态 |
-| `concrete_info/` | 步骤三：`name.sqlite`、`name.xlsx`；`concrete_info/report/` 为分析报告；`concrete_info/info/` 为作者分类等中间文件 |
+| `main.py` | 运行全部分析步骤 |
+| `generate_domestic_reports.py` 等 | 各分析脚本（可被 main 调用或单独运行） |
+| `cfg/` | 阈值、修复脚本参数 |
+| `tool/` | 作者分类、HTML 修复等辅助工具 |
+
+建库见独立子包 **`steam-grant-table/`**。
 
 路径常量见 `data_paths.py`（内部使用 `lib/paradox_paths.py`）。
-
-## 流程目录
-
-- `cfg/`：共享 YAML 配置（`base_info.yml` + 各脚本专用 yml）
-- `tool/`：修复异常 HTML、作者分类、SQLite → Excel
-- `build_sqlite/`：从 HTML 建库并导出 Excel
-- `analysis_src/`：统计与可视化
-
-## 可执行脚本（推荐顺序）
-
-1. `build_sqlite/build_all_tables.py`  
-   从工坊 HTML 建 `data/table/mods.sqlite3`（含 `mod_tag_flags` 等），导出 `data/table/all_tables.xlsx`。HTML 目录默认 `data/html`，也可指定：`python build_sqlite/build_all_tables.py /你的/html路径` 或 `--html-dir`。作者国籍优先 `data/info/author_classification_result.json`。
-
-2. `tool/export_sqlite_to_csv_excel.py`  
-   单独将 SQLite 导出 Excel（默认 `data/table/`）。
-
-3. `analysis_src/main.py`  
-   **一键分析**：读 `data/table/mods.sqlite3`，将报告/图表/CSV 写入 `data/result/`（默认通用文件名，如 `subscribers_inequality_report.md`、`figures/`）。
-
-4. `build_sqlite/export_subscriber_exposure_ratio_with_mod_name.py`  
-   （可选）从库表导出比率 CSV 到 `data/table/`；`--rebuild-table` 可先重建表。
-
-5. `build_sqlite/build_mod_tag_flags.py`  
-   （可选）仅重建 `mod_tag_flags`。
-
-也可单独运行 `analysis_src/` 下各分析脚本；`game_profile.py` 提供游戏名与默认路径。

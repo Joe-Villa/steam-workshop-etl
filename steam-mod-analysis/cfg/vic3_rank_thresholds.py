@@ -109,7 +109,7 @@ def calculate_rank_cutoffs(
 def calculate_rank_cutoffs_from_mods_sqlite(
     db_path: str | Path,
     *,
-    table_name: str = "mods",
+    table_name: str = "aaa_mods",
     subscribers_column: str = "subscribers",
     prestige_transform: str = "identity",
     min_num_countries: int = 100,

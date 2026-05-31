@@ -27,7 +27,12 @@ _here = Path(__file__).resolve().parent.parent / "src"
 if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
 
-from app_config import CONFIG_PATH, STEAMPP_LOCAL_PROXY_PORT, load_app_config
+from app_config import (
+    STEAMPP_LOCAL_PROXY_PORT,
+    bootstrap_config_from_argv,
+    get_config_path,
+    load_app_config,
+)
 from egress import clear_proxy_env
 
 _USER_AGENT = "HtmlBatchRunner/1.0 (checkport)"
@@ -130,6 +135,7 @@ def _probe_port_all_targets(
 
 
 def main() -> None:
+    bootstrap_config_from_argv(sys.argv[1:])
     cleared = clear_proxy_env()
     try:
         cfg = load_app_config()
@@ -137,17 +143,18 @@ def main() -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)
 
+    config_path = get_config_path()
     ports = cfg.crawler.ports
     ignore_tls = cfg.safety.ignore_tls_for_26561
     targets = _probe_targets_from_urls(cfg.test_urls)
 
-    print(f"Using Ports from {CONFIG_PATH} ({len(ports)} port entries)")
+    print(f"Using Ports from {config_path} ({len(ports)} port entries)")
     print(
         f"safety.26561_ignore_tsl={ignore_tls} "
         f"(port {STEAMPP_LOCAL_PROXY_PORT} TLS verify "
         f"{'off' if ignore_tls else 'on'})"
     )
-    print(f"Probe URLs from {CONFIG_PATH} test_url ({len(targets)} targets)")
+    print(f"Probe URLs from {config_path} test_url ({len(targets)} targets)")
     print("Environment proxy vars: ignored (cleared for this run)")
     if cleared:
         for line in cleared:

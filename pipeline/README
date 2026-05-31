@@ -1,0 +1,72 @@
+# 流水线运行规范
+
+## 总控
+
+```bash
+python3 main.py pipeline/pipeline.json
+```
+
+只读取 `pipeline/pipeline.json` 决定执行哪些步骤；状态文件路径由其中的 `"state"` 显式指定。
+
+## 每个子包
+
+1. 必须有 `main.py`
+2. **只接受一个参数**：该步骤的 paths JSON
+3. 运行前检查 paths（含：输出目录为空，或已有 `state` 指定的 SQLite 状态文件；非空且无状态文件则拒绝）
+
+```bash
+python3 appid-steamworkshop-table/main.py pipeline/collect_simple_info.json
+python3 resumable-batch-fetch/main.py pipeline/collect_detail_fetch.json
+python3 steam-grant-table/main.py pipeline/build_grant_table.json
+python3 steam-mod-analysis/main.py pipeline/run_analysis.json
+```
+
+## paths JSON
+
+| 字段 | 含义 |
+|------|------|
+| `input` | 对象 `{"角色": "路径"}` 或路径数组（**顺序无关**，按类型/位置自动识别角色） |
+| `cfg` | 配置路径数组，须含 `{"base": "cfg/base.json"}` |
+| `output` | **唯一**输出目录（本阶段产物根） |
+| `state` | 输出目录内的 SQLite 状态文件名（断点续跑） |
+| `options` | 可选，如 `skip_fetch`、`skip_excel` |
+| `game` | 可选，分析步骤游戏前缀（等同 `options.game`） |
+
+### input 角色名
+
+| 角色 | 用于 |
+|------|------|
+| `urls` | 步骤 2 |
+| `detail_html` | 步骤 3 |
+| `browse_sqlite` | 步骤 3（步骤 1 的 `simple_info/name.sqlite`） |
+| `workshop_status` | 步骤 3 可选 |
+| `grant_sqlite` | 步骤 4（`concrete_info/name.sqlite`） |
+
+数组写法时程序根据路径自动归类，**调换顺序不会错**；推荐对象写法更直观。
+
+## 四步与目录
+
+| 步骤 | 子包 | output 目录 |
+|------|------|-------------|
+| 1 | appid-steamworkshop-table | `data/<APPID>/simple_info` |
+| 2 | resumable-batch-fetch | `data/<APPID>/concrete_html` |
+| 3 | steam-grant-table | `data/<APPID>/concrete_info`（input：详情 HTML + 步骤 1 的 `simple_info/name.sqlite`） |
+| 4 | steam-mod-analysis | `data/<APPID>/report` |
+
+`report/` 与 `simple_info/` 等平级，不再使用 `concrete_info/report/`。
+
+## pipeline.json
+
+```json
+{
+    "state": "data/<APPID>/pipeline_state.json",
+    "process": {
+        "1": { "paths": "pipeline/collect_simple_info.json", "execute": "appid-steamworkshop-table/main.py" },
+        "2": { "paths": "pipeline/collect_detail_fetch.json", "execute": "resumable-batch-fetch/main.py" },
+        "3": { "paths": "pipeline/build_grant_table.json", "execute": "steam-grant-table/main.py" },
+        "4": { "paths": "pipeline/run_analysis.json", "execute": "steam-mod-analysis/main.py" }
+    }
+}
+```
+
+`root` 可省略：默认取 `pipeline/` 的上一级目录（即仓库根）。若需指定，可写绝对路径或相对于 `pipeline.json` 所在目录的相对路径。

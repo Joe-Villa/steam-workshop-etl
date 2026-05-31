@@ -22,16 +22,30 @@ LEGACY_APPID_STATUS_DIR = "status"
 class Stage(StrEnum):
     SIMPLE_INFO = "simple_info"
     DETAIL_FETCH = "detail_fetch"
-    ANALYSIS = "analysis"
+    GRANT_TABLE = "grant_table"
+    MOD_ANALYSIS = "mod_analysis"
     DONE = "done"
+
+    # legacy alias
+    ANALYSIS = "mod_analysis"
 
 
 STAGE_ORDER: tuple[Stage, ...] = (
     Stage.SIMPLE_INFO,
     Stage.DETAIL_FETCH,
-    Stage.ANALYSIS,
+    Stage.GRANT_TABLE,
+    Stage.MOD_ANALYSIS,
     Stage.DONE,
 )
+
+_STEP_ID_TO_STAGE: dict[str, Stage] = {
+    "1": Stage.SIMPLE_INFO,
+    "2": Stage.DETAIL_FETCH,
+    "3": Stage.GRANT_TABLE,
+    "4": Stage.MOD_ANALYSIS,
+}
+
+_STAGE_TO_STEP_ID: dict[Stage, str] = {v: k for k, v in _STEP_ID_TO_STAGE.items()}
 
 
 @dataclass(frozen=True)
@@ -63,8 +77,8 @@ class PipelineError(Exception):
 ERR_DATA_DIR_NOT_EMPTY = PipelineErrorInfo(
     "DATA_DIR_NOT_EMPTY",
     "数据目录已存在且非空，拒绝作为全新流水线启动",
-    "cfg/base.json 中的 data-folder 指向的目录里已有爬取产物（HTML/SQLite/JSON 等）。",
-    "换一个新的空目录作为 data-folder，或确认可以覆盖后使用 --force-fresh；"
+    "数据根目录（manifest output 或 data/<APPID>/）里已有爬取产物（HTML/SQLite/JSON 等）。",
+    "换一个新的空目录作为 output，或确认可以覆盖后使用 --force-fresh；"
     "若只是断点续跑，不要加 --fresh，直接运行 python main.py。",
     exit_code=3,
 )
@@ -73,14 +87,14 @@ ERR_APPID_MISMATCH = PipelineErrorInfo(
     "APPID_MISMATCH",
     "配置中的 APPID 与数据目录内快照不一致",
     "current_situation.json 里的 APPID 与 cfg/base.json 的 target-game-id 不同。",
-    "检查是否误用了别的游戏数据目录；修正 data-folder 或 target-game-id 后重试。",
+    "检查是否误用了别的游戏数据目录；修正 manifest output 或 target-game-id 后重试。",
     exit_code=3,
 )
 
 ERR_MISSING_PREREQUISITE = PipelineErrorInfo(
     "MISSING_PREREQUISITE",
     "上一阶段产物缺失，无法进入当前阶段",
-    "流水线要求按 simple_info → detail_fetch → analysis 顺序产出文件。",
+    "流水线要求按 simple_info → detail_fetch → grant_table → mod_analysis 顺序产出文件。",
     "先完成上一阶段（python main.py 会自动从断点阶段继续），或用 --from 指定更早阶段。",
     exit_code=4,
 )
@@ -153,11 +167,21 @@ class PipelineState:
                         last_error=rec.get("last_error"),
                         subprocess_exit=rec.get("subprocess_exit"),
                     )
+        current = str(data.get("current_stage", Stage.SIMPLE_INFO.value))
+        if current == "analysis":
+            current = Stage.GRANT_TABLE.value
+        legacy_analysis = stages.pop("analysis", None)
+        if legacy_analysis and Stage.GRANT_TABLE.value not in stages:
+            stages[Stage.GRANT_TABLE.value] = legacy_analysis
+        if legacy_analysis and Stage.MOD_ANALYSIS.value not in stages:
+            stages[Stage.MOD_ANALYSIS.value] = StageRecord(
+                status="pending",
+            )
         return cls(
             version=int(data.get("version", 1)),
             appid=int(data["appid"]),
             data_folder=str(data["data_folder"]),
-            current_stage=str(data.get("current_stage", Stage.SIMPLE_INFO)),
+            current_stage=current,
             stages=stages,
             updated_at=str(data.get("updated_at", "")),
         )
@@ -165,6 +189,10 @@ class PipelineState:
 
 def pipeline_state_path(layout: ParadoxDataLayout) -> Path:
     return layout.root / PIPELINE_STATE_NAME
+
+
+def pipeline_state_path_at(state_file: Path) -> Path:
+    return state_file.resolve()
 
 
 def _utc_now() -> str:
@@ -316,21 +344,32 @@ def detail_fetch_complete(layout: ParadoxDataLayout) -> bool:
     return stats["pending"] == 0 and stats["fail"] == 0
 
 
-def analysis_complete(layout: ParadoxDataLayout) -> bool:
-    if not _file_has_content(layout.analysis_sqlite, min_bytes=100):
-        return False
-    report = layout.analysis_report_dir
+def grant_table_complete(layout: ParadoxDataLayout) -> bool:
+    return _file_has_content(layout.analysis_sqlite, min_bytes=100)
+
+
+def mod_analysis_complete(layout: ParadoxDataLayout) -> bool:
+    report = layout.report_dir
     if not report.is_dir():
         return False
+    state = report / "stage_state.sqlite"
+    if state.is_file():
+        return True
     return any(report.glob("*.md")) or any(report.rglob("*.csv"))
+
+
+def analysis_complete(layout: ParadoxDataLayout) -> bool:
+    return grant_table_complete(layout) and mod_analysis_complete(layout)
 
 
 def infer_stage(layout: ParadoxDataLayout) -> Stage:
     validate_appid_consistency(layout)
-    if analysis_complete(layout):
+    if mod_analysis_complete(layout):
         return Stage.DONE
+    if grant_table_complete(layout):
+        return Stage.MOD_ANALYSIS
     if detail_fetch_complete(layout):
-        return Stage.ANALYSIS
+        return Stage.GRANT_TABLE
     if simple_info_complete(layout):
         return Stage.DETAIL_FETCH
     if data_root_has_meaningful_content(layout):
@@ -338,8 +377,23 @@ def infer_stage(layout: ParadoxDataLayout) -> Stage:
     return Stage.SIMPLE_INFO
 
 
-def load_pipeline_state(layout: ParadoxDataLayout) -> PipelineState | None:
-    path = pipeline_state_path(layout)
+def stage_for_step_id(step_id: str) -> Stage | None:
+    return _STEP_ID_TO_STAGE.get(str(step_id))
+
+
+def step_id_for_stage(stage: Stage) -> str | None:
+    if stage == Stage.DONE:
+        return None
+    return _STAGE_TO_STEP_ID.get(stage)
+
+
+def load_pipeline_state(
+    layout: ParadoxDataLayout,
+    *,
+    state_path: Path | None = None,
+) -> PipelineState | None:
+    path = state_path or pipeline_state_path(layout)
+    path = path.resolve()
     if not path.is_file():
         return None
     try:
@@ -356,11 +410,16 @@ def load_pipeline_state(layout: ParadoxDataLayout) -> PipelineState | None:
     return state
 
 
-def save_pipeline_state(layout: ParadoxDataLayout, state: PipelineState) -> None:
+def save_pipeline_state(
+    layout: ParadoxDataLayout,
+    state: PipelineState,
+    *,
+    state_path: Path | None = None,
+) -> None:
     state.updated_at = _utc_now()
     state.data_folder = str(layout.root)
     state.appid = layout.appid
-    path = pipeline_state_path(layout)
+    path = (state_path or pipeline_state_path(layout)).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(state.to_dict(), ensure_ascii=False, indent=2) + "\n",
@@ -407,7 +466,9 @@ def resolve_run_stage(
             if cur == Stage.SIMPLE_INFO and simple_info_complete(layout):
                 return Stage.DETAIL_FETCH
             if cur == Stage.DETAIL_FETCH and detail_fetch_complete(layout):
-                return Stage.ANALYSIS
+                return Stage.GRANT_TABLE
+            if cur == Stage.GRANT_TABLE and grant_table_complete(layout):
+                return Stage.MOD_ANALYSIS
             return cur
     return infer_stage(layout)
 
@@ -422,7 +483,7 @@ def assert_prerequisites(layout: ParadoxDataLayout, stage: Stage) -> None:
                 detail="需要 simple_info/urls.json 与 simple_info/name.sqlite",
             )
         return
-    if stage == Stage.ANALYSIS:
+    if stage in (Stage.GRANT_TABLE, Stage.ANALYSIS):
         if not simple_info_complete(layout):
             raise PipelineError(ERR_MISSING_PREREQUISITE, detail="缺少简略表")
         if not detail_fetch_complete(layout):
@@ -431,6 +492,13 @@ def assert_prerequisites(layout: ParadoxDataLayout, stage: Stage) -> None:
                 ERR_MISSING_PREREQUISITE,
                 detail=f"详情爬取未完成: pending={stats.get('pending', '?')}, "
                 f"fail={stats.get('fail', '?')}",
+            )
+        return
+    if stage == Stage.MOD_ANALYSIS:
+        if not grant_table_complete(layout):
+            raise PipelineError(
+                ERR_MISSING_PREREQUISITE,
+                detail="缺少 concrete_info/name.sqlite（请先运行 steam-grant-table）",
             )
 
 
@@ -442,7 +510,6 @@ def clear_intermediate_status_files(
     candidates = [
         layout.browse_html_gaps_json,
         layout.mod_fetch_log,
-        pipeline_state_path(layout),
         layout.concrete_html_root / "id_collection_state.json",
         layout.concrete_html_root / "mod_html_fetch_state.json",
         layout.concrete_html_root / "mod_index.json",
@@ -485,7 +552,8 @@ def format_status_report(layout: ParadoxDataLayout, state: PipelineState | None)
         )
     else:
         lines.append("  detail_fetch: (无 mod_fetch.sqlite)")
-    lines.append(f"  analysis 完成: {analysis_complete(layout)}")
+    lines.append(f"  grant_table 完成: {grant_table_complete(layout)}")
+    lines.append(f"  mod_analysis 完成: {mod_analysis_complete(layout)}")
     lines.append(f"  详情 HTML 文件数: {_count_html_files(layout.concrete_html_root)}")
     lines.append(f"  简略 HTML 文件数: {_count_html_files(layout.simple_html_root)}")
     return "\n".join(lines)

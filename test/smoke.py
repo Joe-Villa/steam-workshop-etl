@@ -4,7 +4,7 @@
 
 检查项（均可单独跳过见 ``--skip``）：
   config      — cfg/base.json、cfg/crawler.json 可读
-  data_dir    — data-folder 可创建/可写
+  data_dir    — 阶段 1 manifest output（或 data/<APPID>/）可创建/可写
   proxy_base  — base.json 的 PORT 已监听（若配置了代理）
   app_workshop — Steam Store API：有效 APPID 且含创意工坊
   workshop_hub — 能打开 steamcommunity 工坊主页（阶段 1 同款出口）
@@ -42,6 +42,7 @@ from paradox_paths import (  # noqa: E402
     load_layout,
     parse_appid,
 )
+from pipeline_manifest import load_stage_manifest  # noqa: E402
 from app_config import (  # noqa: E402
     crawler_config_path,
     load_app_config,
@@ -155,14 +156,18 @@ def check_config(repo: Path) -> CheckResult:
 
 
 def check_data_dir(repo: Path, cfg: dict) -> CheckResult:
+    data_root = None
+    manifest = repo / "pipeline" / "collect_simple_info.json"
+    if manifest.is_file():
+        data_root = load_stage_manifest(manifest).output_root
     try:
-        layout = load_layout(repo, cfg=cfg)
+        layout = load_layout(repo, cfg=cfg, data_root=data_root)
     except SystemExit as e:
         return CheckResult(
             "data_dir",
             False,
             str(e),
-            "修正 cfg/base.json 的 target-game-id / data-folder",
+            "修正 cfg/base.json 的 target-game-id 或 pipeline/collect_simple_info.json 的 output",
             1,
         )
     root = layout.root
@@ -176,7 +181,7 @@ def check_data_dir(repo: Path, cfg: dict) -> CheckResult:
             "data_dir",
             False,
             f"数据目录不可写: {root} ({e})",
-            "更换 data-folder 或修正目录权限",
+            "更换 manifest output 或修正目录权限",
             2,
         )
     return CheckResult("data_dir", True, f"数据目录可写: {root}")

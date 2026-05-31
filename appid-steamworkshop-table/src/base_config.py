@@ -1,8 +1,7 @@
-"""Load repo-root cfg/base.json (APPID, proxy PORT, no_tls_verify)."""
+"""Manifest-driven layout + cfg/base.json (APPID, proxy PORT, no_tls_verify)."""
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -14,35 +13,28 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
 from paradox_paths import (  # noqa: E402
-    base_json_path,
-    find_repo_root,
+    ParadoxDataLayout,
     load_base_json as _load_base_json,
-    load_layout,
-    merge_write_target_game,
     parse_appid,
 )
-
-
-def cfg_path() -> Path:
-    return base_json_path(_REPO_ROOT)
+from pipeline_manifest import StageManifest, load_cfg_from_manifest, load_stage_manifest  # noqa: E402
+from stage_layout import layout_from_manifest  # noqa: E402
 
 
 def load_base_json() -> dict:
+    """Repo ``cfg/base.json`` (for standalone tools invoked without a manifest)."""
     return _load_base_json(_REPO_ROOT)
 
 
-def load_appid_from_cfg(cfg: dict | None = None) -> int:
-    if cfg is None:
-        cfg = load_base_json()
+def resolve_run(manifest_path: Path) -> tuple[StageManifest, ParadoxDataLayout, dict]:
+    spec = load_stage_manifest(manifest_path)
+    cfg = load_cfg_from_manifest(spec)
+    layout = layout_from_manifest(spec, cfg)
+    return spec, layout, cfg
+
+
+def load_appid_from_cfg(cfg: dict) -> int:
     return parse_appid(cfg)
-
-
-def merge_write_appid(appid: int) -> None:
-    merge_write_target_game(appid, repo_root=_REPO_ROOT)
-
-
-def data_layout():
-    return load_layout(_REPO_ROOT)
 
 
 def parse_proxy_port(cfg: dict) -> int | None:
@@ -53,17 +45,18 @@ def parse_proxy_port(cfg: dict) -> int | None:
     if raw is None or raw == -1:
         return None
     if isinstance(raw, bool) or not isinstance(raw, int):
-        print('ERROR: cfg/base.json "PORT" must be -1 or 1..65535.', file=sys.stderr)
+        print('ERROR: cfg "PORT" must be -1 or 1..65535.', file=sys.stderr)
         raise SystemExit(2)
     if not 1 <= raw <= 65535:
-        print('ERROR: cfg/base.json "PORT" must be -1 or 1..65535.', file=sys.stderr)
+        print('ERROR: cfg "PORT" must be -1 or 1..65535.', file=sys.stderr)
         raise SystemExit(2)
     return int(raw)
 
 
 def http_settings_from_cfg_and_args(args, cfg: dict | None = None) -> tuple[int | None, bool]:
     if cfg is None:
-        cfg = load_base_json()
+        print("ERROR: cfg required for http_settings_from_cfg_and_args", file=sys.stderr)
+        raise SystemExit(2)
     return parse_proxy_port(cfg), verify_tls_enabled(args, cfg)
 
 

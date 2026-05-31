@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-One-shot pipeline: APPID → workshop status → browse URLs → HTML → SQLite → Excel.
+简略信息表：仅接受一个 paths JSON 参数。
 
-If simple_info/html/ already has any .html files, resume crawling (skip valid pages).
-Otherwise clear crawl/build outputs and run from scratch.
+用法:
+  python3 main.py pipeline/collect_simple_info.json
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 _MOD_ROOT = Path(__file__).resolve().parent
 _SRC = _MOD_ROOT / "src"
@@ -22,23 +22,21 @@ for _p in (_SRC, _TOOL):
         sys.path.insert(0, str(_p))
 
 from browse_coverage import iter_saved_row_ids
-from browse_html import load_browse_urls
 from build_browse_urls import build_browse_urls_from_workshop_main
 from build_mods_sqlite import build_database
 from export_detail_urls_json import export_detail_urls
 from export_sqlite_to_csv_excel import export_database
 from fetch_browse_until_complete import run_until_complete
 from base_config import (
-    cfg_path,
-    data_layout,
     format_egress,
     http_settings_from_cfg_and_args,
     load_appid_from_cfg,
-    load_base_json,
-    merge_write_appid,
+    resolve_run,
 )
-from http_tls import add_no_tls_verify_arg, clear_proxy_env
-from paths import get_layout, project_root_for_logs
+from http_tls import clear_proxy_env
+from paths import project_root_for_logs, set_active_layout
+from pipeline_manifest import StageManifest
+from stage_entry import run_stage_main
 from workshop_main_status import fetch_workshop_main, parse_workshop_main_html
 
 _MAX_RETRIES_PER_RUN = 5
@@ -168,61 +166,34 @@ def run_export_detail_urls(layout) -> None:
     print(f"  wrote {layout.detail_urls_json.relative_to(root)} ({n} URLs)", flush=True)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Run full appid-steamworkshop-table pipeline for a Steam workshop APPID."
-    )
-    ap.add_argument(
-        "appid",
-        type=int,
-        nargs="?",
-        default=None,
-        help="Steam APPID (e.g. 529340). If omitted, uses cfg/base.json.",
-    )
-    ap.add_argument(
-        "--skip-fetch",
-        action="store_true",
-        help="Skip HTTP crawl (only rebuild sqlite/xlsx from existing HTML).",
-    )
-    add_no_tls_verify_arg(ap)
-    args = ap.parse_args()
+def _run_stage(spec: StageManifest, cfg: dict) -> None:
     clear_proxy_env()
-    cfg = load_base_json()
-    proxy_port, verify_tls = http_settings_from_cfg_and_args(args, cfg)
+    _, layout, cfg = resolve_run(spec.manifest_path)
+    set_active_layout(layout)
+    tls_args = SimpleNamespace(no_tls_verify=bool(cfg.get("no_tls_verify")))
+    proxy_port, verify_tls = http_settings_from_cfg_and_args(tls_args, cfg)
+    appid = load_appid_from_cfg(cfg)
+    skip_fetch = bool(spec.options.get("skip_fetch"))
 
-    if args.appid is not None:
-        if args.appid <= 0:
-            print("ERROR: APPID must be positive.", file=sys.stderr)
-            raise SystemExit(2)
-        appid = int(args.appid)
-    else:
-        if not cfg_path().is_file():
-            print("ERROR: provide APPID on CLI or set cfg/base.json", file=sys.stderr)
-            raise SystemExit(2)
-        appid = load_appid_from_cfg(cfg)
-
-    merge_write_appid(appid)
-    layout = data_layout()
     print(
-        f"appid-steamworkshop-table pipeline — APPID {appid}, "
-        f"data={layout.root}, "
-        f"egress={format_egress(proxy_port)}, tls_verify={verify_tls}",
+        f"appid-steamworkshop-table — output={spec.output_root}, "
+        f"APPID {appid}, egress={format_egress(proxy_port)}, tls_verify={verify_tls}",
         flush=True,
     )
 
-    if args.skip_fetch:
+    if skip_fetch:
         if not html_root_has_any_pages(layout.simple_html_root):
-            print("ERROR: --skip-fetch but simple_info/html/ is empty.", file=sys.stderr)
+            print("ERROR: skip_fetch but html/ is empty.", file=sys.stderr)
             raise SystemExit(2)
         n = len(iter_saved_row_ids(layout.simple_html_root))
-        print(f"--skip-fetch: using existing HTML ({n} file(s)).", flush=True)
+        print(f"skip_fetch: using existing HTML ({n} file(s)).", flush=True)
     elif should_resume_crawl(
         layout.simple_html_root, layout.current_situation_json, appid
     ):
         n = len(iter_saved_row_ids(layout.simple_html_root))
         print(f"Found existing HTML ({n} file(s)); resuming crawl.", flush=True)
     else:
-        print("No usable HTML cache; full restart (clear html / sqlite / xlsx).", flush=True)
+        print("No usable HTML cache; full restart.", flush=True)
         clear_crawl_and_build_outputs(layout)
 
     run_workshop_main(
@@ -234,10 +205,8 @@ def main() -> None:
     urls = run_build_browse_urls(
         layout.current_situation_json, layout.browse_urls_json
     )
-
-    if not args.skip_fetch:
+    if not skip_fetch:
         run_fetch(urls, verify_tls=verify_tls, proxy_port=proxy_port, layout=layout)
-
     run_build_sqlite(layout)
     run_export_excel(layout)
     run_export_detail_urls(layout)
@@ -245,8 +214,10 @@ def main() -> None:
     root = project_root_for_logs()
     print("\nDone.", flush=True)
     print(f"  {layout.simple_sqlite.relative_to(root)}", flush=True)
-    print(f"  {layout.simple_xlsx.relative_to(root)}", flush=True)
-    print(f"  {layout.detail_urls_json.relative_to(root)}", flush=True)
+
+
+def main() -> None:
+    run_stage_main(_run_stage)
 
 
 if __name__ == "__main__":

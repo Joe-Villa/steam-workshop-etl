@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Paradox 工坊数据流水线总控。
+Paradox 工坊流水线总控。
 
-- 路径由仓库根 cfg/base.json 决定（可设绝对路径 data-folder）
-- pipeline_state.json 记录断点；各子包内部另有细粒度状态
-- 全新启动要求数据目录为空，防止误覆盖已有爬取数据
+用法:
+  python3 main.py pipeline/pipeline.json
+  python3 main.py pipeline/pipeline.json --status
+  python3 main.py pipeline/pipeline.json --dry-run
+  python3 main.py pipeline/pipeline.json --from 3
+  python3 main.py pipeline/pipeline.json --only 2
 """
 
 from __future__ import annotations
@@ -19,17 +22,15 @@ _LIB = _REPO / "lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
-from paradox_paths import (  # noqa: E402
-    ensure_layout_dirs,
-    load_base_json,
-    load_layout,
-    merge_write_base_config,
-    parse_appid,
-)
+from paradox_paths import ensure_layout_dirs, load_base_json  # noqa: E402
+from pipeline_manifest import load_stage_manifest  # noqa: E402
+from pipeline_definition import PipelineDefinition, PipelineStep, load_pipeline_definition  # noqa: E402
+from stage_layout import layout_from_manifest  # noqa: E402
 from subprocess_python import resolve_package_python  # noqa: E402
 from pipeline import (  # noqa: E402
     ERR_DATA_DIR_NOT_EMPTY,
     ERR_DETAIL_FETCH_INCOMPLETE,
+    ERR_MISSING_PREREQUISITE,
     ERR_SIMPLE_INFO_INCOMPLETE,
     ERR_STAGE_FAILED,
     PipelineError,
@@ -40,235 +41,139 @@ from pipeline import (  # noqa: E402
     clear_intermediate_status_files,
     detail_fetch_complete,
     format_status_report,
+    grant_table_complete,
     infer_stage,
     is_data_root_empty,
     load_pipeline_state,
     mark_stage_completed,
     mark_stage_failed,
     mark_stage_running,
+    mod_analysis_complete,
     new_pipeline_state,
-    resolve_run_stage,
     save_pipeline_state,
     simple_info_complete,
-    analysis_complete,
+    stage_for_step_id,
+    step_id_for_stage,
 )
 
-_PKG_APPID = _REPO / "appid-steamworkshop-table"
-_PKG_FETCH = _REPO / "resumable-batch-fetch"
-_PKG_ANALYSIS = _REPO / "steam-mod-analysis"
 
-
-def _run_subprocess(
-    argv: list[str],
-    *,
-    cwd: Path,
-    label: str,
-) -> int:
+def _run_subprocess(argv: list[str], *, cwd: Path, label: str) -> int:
     print(f"\n{'=' * 60}", flush=True)
     print(f"▶ {label}", flush=True)
     print(f"  cwd: {cwd}", flush=True)
     print(f"  cmd: {' '.join(argv)}", flush=True)
     print("=" * 60, flush=True)
-    proc = subprocess.run(argv, cwd=str(cwd))
-    return int(proc.returncode)
+    return int(subprocess.run(argv, cwd=str(cwd)).returncode)
 
 
-def run_simple_info(*, extra_argv: list[str]) -> int:
-    argv = [sys.executable, "main.py", *extra_argv]
-    return _run_subprocess(argv, cwd=_PKG_APPID, label="阶段 1/3：简略信息表 (appid-steamworkshop-table)")
+def _layout_for_definition(defn: PipelineDefinition):
+    if not defn.steps:
+        raise PipelineError(ERR_STAGE_FAILED, detail="pipeline.json process 为空")
+    spec = load_stage_manifest(defn.steps[0].paths_file)
+    cfg = load_base_json(defn.repo_root)
+    layout = layout_from_manifest(spec, cfg)
+    return layout
 
 
-def run_detail_fetch() -> int:
-    try:
-        py = resolve_package_python(
-            _PKG_FETCH, required_imports=("aiohttp", "requests")
-        )
-    except RuntimeError as e:
-        print(f"\n阶段 2/3 无法启动：{e}", file=sys.stderr, flush=True)
+def _run_step(step: PipelineStep, *, defn: PipelineDefinition) -> int:
+    paths_arg = step.paths_file
+    if not step.execute.is_file():
+        print(f"ERROR: execute not found: {step.execute}", file=sys.stderr)
         return 2
-    argv = [str(py), "src/main.py"]
-    return _run_subprocess(argv, cwd=_PKG_FETCH, label="阶段 2/3：详情页爬取 (resumable-batch-fetch)")
-
-
-def run_analysis(*, game: str) -> int:
-    html = load_layout(_REPO).concrete_html_root
-    db = load_layout(_REPO).analysis_sqlite
-    xlsx = load_layout(_REPO).analysis_xlsx
-
-    code = _run_subprocess(
-        [
-            sys.executable,
-            "build_sqlite/build_all_tables.py",
-            "--html-dir",
-            str(html),
-            "--db-path",
-            str(db),
-            "--output-file",
-            str(xlsx),
-        ],
-        cwd=_PKG_ANALYSIS,
-        label="阶段 3a/3：建库 (steam-mod-analysis/build_all_tables)",
-    )
-    if code != 0:
-        return code
-
+    cwd = step.execute.parent
+    if step.execute.parent.name == "resumable-batch-fetch":
+        try:
+            py = resolve_package_python(
+                cwd, required_imports=("aiohttp", "requests")
+            )
+        except RuntimeError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+        argv = [str(py), str(step.execute.name), str(paths_arg)]
+    else:
+        argv = [sys.executable, str(step.execute.name), str(paths_arg)]
     return _run_subprocess(
-        [
-            sys.executable,
-            "analysis_src/main.py",
-            "--db-path",
-            str(db),
-            "--result-dir",
-            str(load_layout(_REPO).analysis_report_dir),
-            "--game",
-            game,
-        ],
-        cwd=_PKG_ANALYSIS,
-        label="阶段 3b/3：统计分析 (steam-mod-analysis/analysis_src)",
+        argv,
+        cwd=cwd,
+        label=f"步骤 {step.step_id}: {step.execute.parent.name}",
     )
 
 
-def run_stage(stage: Stage, *, tls_argv: list[str], game: str) -> int:
-    if stage == Stage.SIMPLE_INFO:
-        return run_simple_info(extra_argv=tls_argv)
-    if stage == Stage.DETAIL_FETCH:
-        return run_detail_fetch()
-    if stage == Stage.ANALYSIS:
-        return run_analysis(game=game)
-    return 0
-
-
-def _stages_to_run(start: Stage, *, only: Stage | None) -> list[Stage]:
-    if only is not None:
-        return [only]
-    if start == Stage.DONE:
-        return []
-    idx = STAGE_ORDER.index(start)
-    return [s for s in STAGE_ORDER[idx:] if s != Stage.DONE]
-
-
-def _guard_new_pipeline_without_fresh(layout, fresh: bool, force_fresh: bool) -> None:
-    if fresh or force_fresh:
-        return
-    if load_pipeline_state(layout) is not None:
-        return
-    if infer_stage(layout) != Stage.SIMPLE_INFO:
-        return
-    if not is_data_root_empty(layout):
+def _check_step_after(stage: Stage, layout) -> None:
+    if stage == Stage.SIMPLE_INFO and not simple_info_complete(layout, strict_browse=False):
+        raise PipelineError(ERR_SIMPLE_INFO_INCOMPLETE)
+    if stage == Stage.DETAIL_FETCH and not detail_fetch_complete(layout):
+        raise PipelineError(ERR_DETAIL_FETCH_INCOMPLETE)
+    if stage == Stage.GRANT_TABLE and not grant_table_complete(layout):
         raise PipelineError(
-            ERR_DATA_DIR_NOT_EMPTY,
-            detail=(
-                f"{layout.root} 中已有数据，但未找到 pipeline_state.json。"
-                " 若确为断点续跑，请先运行 python main.py --status 查看推断阶段；"
-                " 不要用 --fresh。"
-            ),
+            ERR_STAGE_FAILED,
+            detail="grant_table 产物检查未通过（concrete_info/name.sqlite）",
         )
+    if stage == Stage.MOD_ANALYSIS and not mod_analysis_complete(layout):
+        raise PipelineError(
+            ERR_STAGE_FAILED,
+            detail="mod_analysis 产物检查未通过（report/）",
+        )
+
+
+def _steps_from(
+    defn: PipelineDefinition,
+    *,
+    start_step_id: str | None,
+    only_step_id: str | None,
+) -> list[PipelineStep]:
+    if only_step_id is not None:
+        for s in defn.steps:
+            if s.step_id == only_step_id:
+                return [s]
+        raise PipelineError(ERR_STAGE_FAILED, detail=f"未知步骤 id: {only_step_id}")
+    if start_step_id is None:
+        return list(defn.steps)
+    out: list[PipelineStep] = []
+    found = False
+    for s in defn.steps:
+        if s.step_id == start_step_id:
+            found = True
+        if found:
+            out.append(s)
+    if not found:
+        raise PipelineError(ERR_STAGE_FAILED, detail=f"未知起始步骤 id: {start_step_id}")
+    return out
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(
-        description="Paradox 工坊流水线总控（断点续跑 / 数据保护 / 分阶段执行）",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  python main.py --status
-  python main.py
-  python main.py 529340 --data-folder /path/to/storage/529340
-  python main.py --fresh
-  python main.py --only detail_fetch
-  python main.py --from analysis
-        """,
-    )
+    ap = argparse.ArgumentParser(description="Paradox 工坊流水线（由 pipeline.json 驱动）")
     ap.add_argument(
-        "appid",
-        nargs="?",
-        type=int,
-        help="Steam APPID；写入 cfg/base.json 后执行流水线",
-    )
-    ap.add_argument(
-        "--data-folder",
+        "pipeline",
         type=Path,
-        help="数据根目录（可绝对路径）；写入 cfg/base.json 的 data-folder",
+        help="流水线定义，如 pipeline/pipeline.json",
     )
-    ap.add_argument(
-        "--status",
-        action="store_true",
-        help="仅打印流水线与产物检查，不执行",
-    )
-    ap.add_argument(
-        "--fresh",
-        action="store_true",
-        help="全新流水线：要求数据目录为空，并清除中间状态文件后从 simple_info 开始",
-    )
-    ap.add_argument(
-        "--force-fresh",
-        action="store_true",
-        help="与 --fresh 联用：数据目录非空也允许启动（不删除已有 HTML，只清状态文件）",
-    )
-    ap.add_argument(
-        "--from",
-        dest="from_stage",
-        choices=[s.value for s in STAGE_ORDER if s != Stage.DONE],
-        metavar="STAGE",
-        help="从指定阶段开始（simple_info | detail_fetch | analysis）",
-    )
-    ap.add_argument(
-        "--only",
-        choices=[s.value for s in STAGE_ORDER if s != Stage.DONE],
-        metavar="STAGE",
-        help="只运行单个阶段",
-    )
-    ap.add_argument(
-        "--game",
-        choices=("workshop", "civ6", "vic3"),
-        default="workshop",
-        help="分析阶段输出命名（传给 steam-mod-analysis）",
-    )
-    ap.add_argument(
-        "--no-tls-verify",
-        action="store_true",
-        help="阶段 1 访问 Steam 时跳过 TLS 证书校验（代理场景）",
-    )
-    ap.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="只显示将执行的阶段，不调用子包",
-    )
+    ap.add_argument("--status", action="store_true", help="仅打印状态")
+    ap.add_argument("--dry-run", action="store_true", help="只列出将执行的步骤")
+    ap.add_argument("--fresh", action="store_true", help="要求数据根为空后从步骤 1 开始")
+    ap.add_argument("--force-fresh", action="store_true", help="与 --fresh 联用：允许非空数据根")
+    ap.add_argument("--from", dest="from_step", metavar="ID", help="从步骤 id 开始（1–4）")
+    ap.add_argument("--only", dest="only_step", metavar="ID", help="只运行指定步骤 id")
     ap.add_argument(
         "--doctor",
         action="store_true",
-        help="运行 test/smoke.py 冒烟测试后退出（不执行流水线）",
+        help="运行 test/smoke.py 后退出",
     )
     return ap.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    cfg = load_base_json(_REPO)
-
-    if args.appid is not None:
-        if args.appid <= 0:
-            print("ERROR: APPID 必须为正整数", file=sys.stderr)
-            raise SystemExit(2)
-        merge_write_base_config(
-            args.appid,
-            data_folder=args.data_folder,
-            repo_root=_REPO,
-        )
-        cfg = load_base_json(_REPO)
-    elif args.data_folder is not None:
-        appid = parse_appid(cfg)
-        merge_write_base_config(appid, data_folder=args.data_folder, repo_root=_REPO)
-        cfg = load_base_json(_REPO)
-
-    layout = load_layout(_REPO, cfg=cfg)
+    defn = load_pipeline_definition(args.pipeline)
+    layout = _layout_for_definition(defn)
     ensure_layout_dirs(layout)
 
-    print(f"配置: {_REPO / 'cfg' / 'base.json'}", flush=True)
-    print(f"数据目录: {layout.root}", flush=True)
+    print(f"仓库根: {defn.repo_root}", flush=True)
+    print(f"状态文件: {defn.state_path}", flush=True)
+    print(f"数据根: {layout.root}", flush=True)
     print(f"APPID: {layout.appid}", flush=True)
 
-    state = load_pipeline_state(layout)
+    state = load_pipeline_state(layout, state_path=defn.state_path)
 
     if args.status:
         print(format_status_report(layout, state))
@@ -276,103 +181,69 @@ def main() -> None:
 
     if args.doctor:
         smoke = _REPO / "test" / "smoke.py"
-        code = subprocess.run([sys.executable, str(smoke)], cwd=str(_REPO)).returncode
-        raise SystemExit(int(code))
-
-    from_stage = Stage(args.from_stage) if args.from_stage else None
-    only = Stage(args.only) if args.only else None
+        raise SystemExit(subprocess.run([sys.executable, str(smoke)], cwd=str(_REPO)).returncode)
 
     if args.fresh and not args.force_fresh and not is_data_root_empty(layout):
         raise PipelineError(ERR_DATA_DIR_NOT_EMPTY, detail=str(layout.root))
 
     if args.fresh or args.force_fresh:
         removed = clear_intermediate_status_files(
-            layout, _REPO, include_fetch_db=args.fresh
+            layout, defn.repo_root, include_fetch_db=args.fresh
         )
+        if defn.state_path.is_file():
+            defn.state_path.unlink()
+            removed.append(str(defn.state_path))
         if removed:
-            print("已清除中间状态文件:", flush=True)
+            print("已清除状态文件:", flush=True)
             for p in removed:
                 print(f"  - {p}", flush=True)
         state = None
 
-    if not args.dry_run:
-        _guard_new_pipeline_without_fresh(layout, args.fresh, args.force_fresh)
+    start_step = args.from_step
+    if start_step is None and state is None and not args.fresh:
+        start_step = step_id_for_stage(infer_stage(layout)) or "1"
+    elif start_step is None and state is not None:
+        start_step = step_id_for_stage(Stage(state.current_stage)) or state.current_stage
 
-    start = resolve_run_stage(
-        layout,
-        state=state,
-        from_stage=from_stage,
-        fresh=args.fresh,
-        force_fresh=args.force_fresh,
-    )
-
-    if start == Stage.DONE and only is None:
-        print("流水线已完成（analysis 产物齐全）。", flush=True)
-        print(format_status_report(layout, state))
-        raise SystemExit(0)
-
-    stages = _stages_to_run(start, only=only)
-    if not stages:
-        print("没有需要执行的阶段。", flush=True)
-        raise SystemExit(0)
+    steps = _steps_from(defn, start_step_id=start_step, only_step_id=args.only_step)
 
     if args.dry_run:
-        print("将执行阶段:", ", ".join(s.value for s in stages))
+        print("将执行步骤:")
+        for s in steps:
+            print(f"  {s.step_id}: {s.execute.name} {s.paths_file}")
         raise SystemExit(0)
 
-    if state is None:
-        state = new_pipeline_state(layout, stages[0])
+    if state is None and steps:
+        first = stage_for_step_id(steps[0].step_id) or Stage.SIMPLE_INFO
+        state = new_pipeline_state(layout, first)
 
-    tls_argv: list[str] = []
-    if args.no_tls_verify:
-        tls_argv.append("--no-tls-verify")
-
-    for stage in stages:
+    for step in steps:
+        stage = stage_for_step_id(step.step_id)
+        if stage is None:
+            continue
         assert_prerequisites(layout, stage)
         mark_stage_running(state, stage)
-        save_pipeline_state(layout, state)
+        save_pipeline_state(layout, state, state_path=defn.state_path)
 
-        code = run_stage(stage, tls_argv=tls_argv, game=args.game)
+        code = _run_step(step, defn=defn)
         if code != 0:
             mark_stage_failed(
                 state,
                 stage,
-                message=f"子进程退出码 {code}",
+                message=f"退出码 {code}",
                 exit_code=code,
             )
-            save_pipeline_state(layout, state)
-            raise PipelineError(
-                ERR_STAGE_FAILED,
-                detail=f"阶段 {stage.value} 退出码 {code}",
-            )
+            save_pipeline_state(layout, state, state_path=defn.state_path)
+            raise PipelineError(ERR_STAGE_FAILED, detail=f"步骤 {step.step_id} 退出码 {code}")
 
-        if stage == Stage.SIMPLE_INFO and not simple_info_complete(layout, strict_browse=False):
-            mark_stage_failed(
-                state,
-                stage,
-                message="产物检查未通过",
-                exit_code=0,
-            )
-            save_pipeline_state(layout, state)
-            raise PipelineError(ERR_SIMPLE_INFO_INCOMPLETE)
-
-        if stage == Stage.DETAIL_FETCH and not detail_fetch_complete(layout):
-            mark_stage_failed(
-                state,
-                stage,
-                message="mod_fetch 仍有未完成行",
-                exit_code=0,
-            )
-            save_pipeline_state(layout, state)
-            raise PipelineError(ERR_DETAIL_FETCH_INCOMPLETE)
-
+        _check_step_after(stage, layout)
         mark_stage_completed(state, stage)
-        save_pipeline_state(layout, state)
-        print(f"\n✓ 阶段完成: {stage.value}", flush=True)
+        save_pipeline_state(layout, state, state_path=defn.state_path)
+        print(f"\n✓ 步骤 {step.step_id} 完成 ({stage.value})", flush=True)
 
-    if analysis_complete(layout):
+    if mod_analysis_complete(layout):
         state.current_stage = Stage.DONE.value
-        save_pipeline_state(layout, state)
+        save_pipeline_state(layout, state, state_path=defn.state_path)
 
     print("\n" + format_status_report(layout, state))
     print("\n流水线本轮执行结束。", flush=True)
@@ -385,5 +256,5 @@ if __name__ == "__main__":
         print(f"\n{e.format_message()}\n", file=sys.stderr)
         raise SystemExit(e.info.exit_code) from e
     except KeyboardInterrupt:
-        print("\n已中断。重新运行 python main.py 可从断点继续。", file=sys.stderr)
+        print("\n已中断。", file=sys.stderr)
         raise SystemExit(130) from None

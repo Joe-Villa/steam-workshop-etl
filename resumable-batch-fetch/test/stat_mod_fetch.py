@@ -12,11 +12,10 @@ _here = Path(__file__).resolve().parent.parent / "src"
 if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
 
-from app_config import resolve_under_root
+from app_config import bootstrap_config_from_argv, load_app_config, resolve_path
 from mod_fetch_db import (
     TABLE_NAME,
     connect_db,
-    load_status_info_path,
     rowcount,
     table_exists,
 )
@@ -36,10 +35,12 @@ def pct(part: int, total: int) -> float:
 
 
 def main() -> None:
-    if len(sys.argv) >= 2:
-        sqlite_path = resolve_under_root(sys.argv[1])
+    remaining = bootstrap_config_from_argv(sys.argv[1:])
+    cfg = load_app_config()
+    if len(remaining) >= 1:
+        sqlite_path = resolve_path(remaining[0])
     else:
-        sqlite_path = load_status_info_path()
+        sqlite_path = cfg.io.sqlite_path
 
     if not sqlite_path.is_file():
         print(f"ERROR: database not found: {sqlite_path}", file=sys.stderr)

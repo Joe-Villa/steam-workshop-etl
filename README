@@ -25,7 +25,8 @@
 |------|-----|----------|
 | 简略信息表 | `appid-steamworkshop-table` | `simple_info/`（`current_situation.json`、`browse_urls.json`、`html/`、`name.sqlite`、`urls.json`） |
 | 详情页爬取 | `resumable-batch-fetch` | 输入 `simple_info/urls.json`；输出 `concrete_html/html/`、`concrete_html/mod_fetch.sqlite` |
-| 建库与分析 | `steam-mod-analysis` | `concrete_html/html/` → `concrete_info/name.sqlite`；报告在 `concrete_info/report/` |
+| 建库 | `steam-grant-table` | `concrete_html/html/` → `concrete_info/name.sqlite` |
+| 分析 | `steam-mod-analysis` | `concrete_info/name.sqlite` → `report/` |
 
 路径解析实现：`lib/paradox_paths.py`。
 

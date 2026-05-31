@@ -15,22 +15,23 @@ _here = Path(__file__).resolve().parent
 if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
 
-from app_config import load_app_config, resolve_under_root
-from mod_fetch_db import init_db_from_urls, load_status_info_path, load_urls_from_json
+from app_config import bootstrap_config_from_argv, load_app_config, resolve_path
+from mod_fetch_db import init_db_from_urls, load_urls_from_json
 
 
 def main() -> None:
+    remaining = bootstrap_config_from_argv(sys.argv[1:])
     cfg = load_app_config()
 
-    if len(sys.argv) >= 2:
-        urls_path = resolve_under_root(sys.argv[1])
+    if len(remaining) >= 1:
+        urls_path = resolve_path(remaining[0])
     else:
         urls_path = cfg.io.input_path
 
-    if len(sys.argv) >= 3:
-        sqlite_path = resolve_under_root(sys.argv[2])
+    if len(remaining) >= 2:
+        sqlite_path = resolve_path(remaining[1])
     else:
-        sqlite_path = load_status_info_path()
+        sqlite_path = cfg.io.sqlite_path
 
     print(f"URL list: {urls_path}")
     print(f"SQLite:   {sqlite_path}")

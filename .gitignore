@@ -1,4 +1,4 @@
-# Python
+# Python 运行时（可重建）
 .venv/
 venv/
 __pycache__/
@@ -18,31 +18,41 @@ build/
 *.swp
 *~
 
-# 密钥与本地环境
+# ── 必须排除：密钥与个人资料 ──
 .env
 .env.*
 *.pem
 *credentials*
+zzz简历复制/
 
-# 爬取数据（GB 级，勿上传 GitHub）
+# ── 必须排除：含第三方用户推断结果（勿外传） ──
+author_classification_result.json
+author_classification_uncertain.json
+author_classification_checkpoint.json
+author_mod_titles_map.json
+**/info/author_*.json
+
+# ── 必须排除：本地运行日志（含用户名与本机路径） ──
+latetimelog
+**/port_health_report.txt
+**/old_port_health_report.txt
+
+# 旧实验数据
+workshopmap/input/
+
+# ── 必须排除：Agent 会话记忆（与项目无关） ──
+memory/
+
+# ── 体积过大 / 运行产物（非设计文档，clone 后自行生成） ──
 data/*
 !data/APPID/
 !data/APPID/**
-
-# 子包运行产物
 **/output/
 **/status/
 **/step/
 **/*.html.tmp
 *.pid
 
-# 旧版爬虫 / 实验子项目的数据
-SteamWorkshopCrawler/data/
-SteamWorkshopCrawler/status/
-workshopmap/input/
-
-# 个人资料（含手机号、邮箱，勿公开）
-zzz简历复制/
-
-# Agent 会话记忆（与项目代码无关）
-memory/
+# 无关本地目录
+civ6-leader-civ-index
+analysis_steam

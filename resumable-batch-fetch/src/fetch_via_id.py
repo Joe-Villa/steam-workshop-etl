@@ -520,6 +520,9 @@ async def main_async() -> None:
 
 
 def main() -> None:
+    from app_config import bootstrap_config_from_argv
+
+    bootstrap_config_from_argv(sys.argv[1:])
     asyncio.run(main_async())
 
 

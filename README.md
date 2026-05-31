@@ -22,7 +22,8 @@
 | `cfg/` | 全局配置（`base.json`、`crawler.json`） |
 | `appid-steamworkshop-table/` | 阶段 1：工坊列表页采集 |
 | `resumable-batch-fetch/` | 阶段 2：详情页异步爬虫 |
-| `steam-mod-analysis/` | 阶段 3：HTML 解析、建库、分析 |
+| `steam-grant-table/` | 阶段 3a：详情 HTML → SQLite / Excel |
+| `steam-mod-analysis/` | 阶段 3b：统计分析 → `report/` |
 | `data/APPID/` | 数据目录结构模板（空占位） |
 | `test/` | 冒烟测试 |
 

@@ -1,0 +1,10 @@
+{
+    "input": {
+        "detail_html": "data/255710/concrete_html/html",
+        "browse_sqlite": "data/255710/simple_info/name.sqlite",
+        "workshop_status": "data/255710/simple_info/current_situation.json"
+    },
+    "cfg": [{"base": "cfg/base.json"}],
+    "output": "data/255710/concrete_info",
+    "state": "name.sqlite"
+}

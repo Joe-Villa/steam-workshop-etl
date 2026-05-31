@@ -1,0 +1,11 @@
+{
+    "input": {
+        "urls": "data/255710/simple_info/urls.json"
+    },
+    "cfg": [
+        {"base": "cfg/base.json"},
+        {"crawler": "cfg/crawler.json"}
+    ],
+    "output": "data/255710/concrete_html",
+    "state": "mod_fetch.sqlite"
+}

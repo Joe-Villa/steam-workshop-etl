@@ -1,4 +1,4 @@
-"""appid-steamworkshop-table I/O paths (from repo cfg/base.json)."""
+"""appid-steamworkshop-table I/O paths (from stage manifest output root)."""
 
 from __future__ import annotations
 
@@ -13,8 +13,17 @@ if str(_LIB) not in sys.path:
 
 from paradox_paths import ParadoxDataLayout, load_layout  # noqa: E402
 
+_active_layout: ParadoxDataLayout | None = None
+
+
+def set_active_layout(layout: ParadoxDataLayout) -> None:
+    global _active_layout
+    _active_layout = layout
+
 
 def get_layout() -> ParadoxDataLayout:
+    if _active_layout is not None:
+        return _active_layout
     return load_layout(_REPO_ROOT)
 
 

@@ -1,4 +1,4 @@
-"""Steam 创意工坊分析：数据目录约定（由 repo ``cfg/base.json`` 决定）。"""
+"""steam-mod-analysis：分析报告路径（由 repo layout 决定）。"""
 
 from __future__ import annotations
 
@@ -11,39 +11,31 @@ _LIB = _REPO_ROOT / "lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
-from paradox_paths import (  # noqa: E402
-    CONCRETE_INFO_SQLITE,
-    CONCRETE_INFO_XLSX,
-    ensure_layout_dirs,
-    load_layout,
-)
+from paradox_paths import ensure_layout_dirs, load_layout  # noqa: E402
 
 _layout = load_layout(_REPO_ROOT)
 DATA_DIR = _layout.root
-HTML_DIR = _layout.concrete_html_root
-BROWSE_SQLITE_PATH = _layout.simple_sqlite
-CURRENT_SITUATION_JSON = _layout.current_situation_json
-TABLE_DIR = _layout.concrete_info
-RESULT_DIR = _layout.analysis_report_dir
-INFO_DIR = _layout.analysis_info_dir
-
-DEFAULT_DB_NAME = CONCRETE_INFO_SQLITE
-DEFAULT_XLSX_NAME = CONCRETE_INFO_XLSX
-DEFAULT_RATIO_CSV_NAME = "mod_subscriber_exposure_ratio_with_name.csv"
-
+RESULT_DIR = _layout.report_dir
 DB_PATH = _layout.analysis_sqlite
-XLSX_PATH = _layout.analysis_xlsx
-RATIO_WITH_NAME_CSV_PATH = TABLE_DIR / DEFAULT_RATIO_CSV_NAME
-
+MODS_TABLE = "aaa_mods"
+INFO_DIR = _layout.analysis_info_dir
 AUTHOR_CLASSIFICATION_JSON = INFO_DIR / "author_classification_result.json"
-AUTHOR_CLASSIFICATION_UNCERTAIN_JSON = INFO_DIR / "author_classification_uncertain.json"
-AUTHOR_CLASSIFICATION_CHECKPOINT_JSON = INFO_DIR / "author_classification_checkpoint.json"
-AUTHOR_MOD_TITLES_JSON = INFO_DIR / "author_mod_titles_map.json"
-
-ID_COLLECTION_STATE_JSON = HTML_DIR / "id_collection_state.json"
-MOD_HTML_FETCH_STATE_JSON = HTML_DIR / "mod_html_fetch_state.json"
-MOD_INDEX_JSON = HTML_DIR / "mod_index.json"
 
 
 def ensure_data_dirs() -> None:
     ensure_layout_dirs(_layout)
+
+
+def reload_layout(*, data_root=None, repo_root=None) -> None:
+    global _layout, DATA_DIR, RESULT_DIR, DB_PATH, INFO_DIR, AUTHOR_CLASSIFICATION_JSON
+    root = repo_root or _REPO_ROOT
+    _layout = load_layout(root, data_root=data_root)
+    DATA_DIR = _layout.root
+    RESULT_DIR = _layout.report_dir
+    DB_PATH = _layout.analysis_sqlite
+    INFO_DIR = _layout.analysis_info_dir
+    AUTHOR_CLASSIFICATION_JSON = INFO_DIR / "author_classification_result.json"
+
+
+def get_layout():
+    return _layout

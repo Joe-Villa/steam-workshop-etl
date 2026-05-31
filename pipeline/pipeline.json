@@ -1,0 +1,21 @@
+{
+    "state": "data/255710/pipeline_state.json",
+    "process": {
+        "1": {
+            "paths": "pipeline/collect_simple_info.json",
+            "execute": "appid-steamworkshop-table/main.py"
+        },
+        "2": {
+            "paths": "pipeline/collect_detail_fetch.json",
+            "execute": "resumable-batch-fetch/main.py"
+        },
+        "3": {
+            "paths": "pipeline/build_grant_table.json",
+            "execute": "steam-grant-table/main.py"
+        },
+        "4": {
+            "paths": "pipeline/run_analysis.json",
+            "execute": "steam-mod-analysis/main.py"
+        }
+    }
+}

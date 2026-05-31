@@ -1,0 +1,18 @@
+# steam-grant-table
+
+从详情页 HTML 构建 `concrete_info/name.sqlite` 并导出 Excel。
+
+## 用法
+
+```bash
+python3 main.py pipeline/build_grant_table.json
+python3 main.py pipeline/build_grant_table.json --skip-excel
+```
+
+## 目录
+
+- `main.py` — 入口（读取 manifest 的 input/cfg/output）
+- `build_sqlite/` — 建表逻辑
+- `tool/export_sqlite_to_csv_excel.py` — Excel 导出
+
+产物：`{output}/concrete_info/name.sqlite`、`name.xlsx`；作者分类中间文件在 `{output}/concrete_info/info/`。

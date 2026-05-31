@@ -26,7 +26,12 @@ _TEST_DIR = Path(__file__).resolve().parent
 _SRC = _TEST_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-from app_config import CONFIG_PATH, STEAMPP_LOCAL_PROXY_PORT, load_app_config  # noqa: E402
+from app_config import (  # noqa: E402
+    STEAMPP_LOCAL_PROXY_PORT,
+    configure,
+    get_config_path,
+    load_app_config,
+)
 from egress import clear_proxy_env  # noqa: E402
 URLS_JSON = _TEST_DIR / "urls.json"
 DEFAULT_REPORT = _TEST_DIR / "port_health_report.txt"
@@ -433,9 +438,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print report to stdout as well as writing the file",
     )
+    ap.add_argument(
+        "--config",
+        "-c",
+        type=Path,
+        default=None,
+        help="Crawler config JSON (default: auto-discover)",
+    )
     return ap.parse_args()
 async def async_main() -> int:
     args = parse_args()
+    if args.config is not None:
+        configure(args.config.resolve())
     if args.samples < 1:
         print("ERROR: --samples must be >= 1", file=sys.stderr)
         return 2
@@ -476,7 +490,7 @@ async def async_main() -> int:
         urls_path=args.urls.resolve(),
         url_index=args.url_index,
         samples=args.samples,
-        config_path=CONFIG_PATH,
+        config_path=get_config_path(),
         generated_at=generated_at,
     )
     body += f"Wall time: {elapsed:.1f}s\n"
