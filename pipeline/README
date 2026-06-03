@@ -59,6 +59,7 @@ python3 steam-mod-analysis/main.py pipeline/run_analysis.json
 
 ```json
 {
+    "root": "/path/to/repo",
     "state": "data/<APPID>/pipeline_state.json",
     "process": {
         "1": { "paths": "pipeline/collect_simple_info.json", "execute": "appid-steamworkshop-table/main.py" },
@@ -69,4 +70,4 @@ python3 steam-mod-analysis/main.py pipeline/run_analysis.json
 }
 ```
 
-`root` 可省略：默认取 `pipeline/` 的上一级目录（即仓库根）。若需指定，可写绝对路径或相对于 `pipeline.json` 所在目录的相对路径。
+相对路径均相对于 `root`。

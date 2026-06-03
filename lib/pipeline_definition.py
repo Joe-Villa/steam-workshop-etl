@@ -49,13 +49,7 @@ def load_pipeline_definition(definition_path: Path) -> PipelineDefinition:
 
     raw_root = data.get("root")
     if isinstance(raw_root, str) and raw_root.strip():
-        repo_root = Path(raw_root.strip()).expanduser()
-        if not repo_root.is_absolute():
-            repo_root = (definition_path.parent / repo_root).resolve()
-        else:
-            repo_root = repo_root.resolve()
-    elif definition_path.parent.name == "pipeline":
-        repo_root = definition_path.parent.parent.resolve()
+        repo_root = Path(raw_root.strip()).expanduser().resolve()
     else:
         repo_root = definition_path.parent.resolve()
 

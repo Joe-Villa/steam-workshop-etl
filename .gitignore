@@ -24,6 +24,9 @@ build/
 *.pem
 *credentials*
 zzz简历复制/
+项目制作说明
+思路
+latetimelog
 
 # ── 必须排除：含第三方用户推断结果（勿外传） ──
 author_classification_result.json
